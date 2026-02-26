@@ -1,0 +1,27 @@
+# Active Context Protocol Configuration
+# https://github.com/finml-sage/active-context-protocol
+
+# Token monitoring — how often to check and when to alert
+token_threshold: 70000        # Total context tokens before compaction reminder
+polling_interval: 30          # Seconds between monitoring cycles
+
+# Delivery — how reminders reach the agent
+warmdown_interval: 120        # Minimum seconds between any two reminders (global)
+grace_period: 600             # Seconds after session start before any reminders fire
+tmux_session: ""              # Target tmux session name (required for delivery)
+log_file: "~/.acp/acp.log"   # Audit trail for all delivery attempts
+
+# Idle detection
+idle_threshold: 5.0           # Seconds since last JSONL write to consider agent idle
+
+# Compaction trigger
+compaction:
+  enabled: true               # Whether compaction reminders are active
+  threshold: 70000            # Token count that triggers compaction reminder
+  cooldown: 120               # Seconds between compaction reminders
+
+# Memory filing trigger
+memory_filing:
+  enabled: true               # Whether memory filing reminders are active
+  grace_after_event: 60       # Seconds to wait after milestone before reminding
+  patterns: []                # Additional regex patterns for milestone detection

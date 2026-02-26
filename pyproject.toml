@@ -9,6 +9,9 @@ description = "Active context management and action protocol for Claude Code age
 requires-python = ">=3.11"
 license = {text = "MIT"}
 
+[project.scripts]
+acp = "src.cli:main"
+
 [project.optional-dependencies]
 test = ["pytest>=7.0"]
 
