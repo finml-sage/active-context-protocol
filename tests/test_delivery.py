@@ -171,6 +171,46 @@ class TestIdleDetection:
         )
         assert ds.is_idle(tmp_jsonl) is False
 
+    def test_not_idle_when_assistant_has_tool_use_blocks(
+        self, ds: DeliverySystem, tmp_jsonl: Path
+    ) -> None:
+        """Assistant entry with tool_use content blocks = tool call initiated."""
+        _write_jsonl(
+            tmp_jsonl,
+            [
+                {
+                    "type": "assistant",
+                    "message": {
+                        "content": [
+                            {"type": "tool_use", "id": "toolu_xxx", "name": "Bash"}
+                        ]
+                    },
+                }
+            ],
+            mtime_offset=-10,
+        )
+        assert ds.is_idle(tmp_jsonl) is False
+
+    def test_idle_when_assistant_has_text_only(
+        self, ds: DeliverySystem, tmp_jsonl: Path
+    ) -> None:
+        """Assistant entry with only text content = agent finished turn."""
+        _write_jsonl(
+            tmp_jsonl,
+            [
+                {
+                    "type": "assistant",
+                    "message": {
+                        "content": [
+                            {"type": "text", "text": "Here is my response."}
+                        ]
+                    },
+                }
+            ],
+            mtime_offset=-10,
+        )
+        assert ds.is_idle(tmp_jsonl) is True
+
     def test_idle_with_many_entries(
         self, ds: DeliverySystem, tmp_jsonl: Path
     ) -> None:

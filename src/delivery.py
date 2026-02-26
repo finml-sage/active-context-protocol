@@ -156,6 +156,17 @@ class DeliverySystem:
                 )
                 return False
 
+            # Check for tool_use blocks in assistant content — if present,
+            # a tool call was just initiated and the agent is busy, not idle.
+            content = entry.get("message", {}).get("content", [])
+            if isinstance(content, list):
+                for block in content:
+                    if isinstance(block, dict) and block.get("type") == "tool_use":
+                        logger.debug(
+                            "Last assistant entry contains tool_use block — agent is busy"
+                        )
+                        return False
+
             return True
 
         except OSError as exc:
@@ -276,7 +287,8 @@ class DeliverySystem:
                 timeout=5,
             )
             return result.returncode == 0
-        except (subprocess.SubprocessError, OSError):
+        except (subprocess.SubprocessError, OSError) as exc:
+            logger.warning("tmux session check failed: %s", exc)
             return False
 
     def _send_to_tmux(self, message: str) -> None:
@@ -338,5 +350,6 @@ class DeliverySystem:
                 # File has only one line
                 return buf.strip().decode("utf-8", errors="replace") or None
 
-        except OSError:
+        except OSError as exc:
+            logger.warning("Failed to read last line of %s: %s", path, exc)
             return None
