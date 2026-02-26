@@ -391,7 +391,7 @@ class TestConstructorDefaults:
 
     def test_default_grace_period(self) -> None:
         trigger = CompactionTrigger()
-        assert trigger.grace_period_seconds == 600
+        assert trigger.grace_period_seconds == 300
 
     def test_custom_values(self) -> None:
         trigger = CompactionTrigger(

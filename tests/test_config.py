@@ -41,7 +41,7 @@ class TestAcpConfig:
         assert config.token_threshold == 70_000
         assert config.polling_interval == 30
         assert config.warmdown_interval == 120
-        assert config.grace_period == 600
+        assert config.grace_period == 300
         assert config.tmux_session == ""
         assert config.log_file == "~/.acp/acp.log"
         assert config.compaction_enabled is True

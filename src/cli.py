@@ -148,9 +148,9 @@ def run_monitor(config: AcpConfig) -> None:
                 if usage and compaction_trigger.should_fire(
                     usage.total_context, session_start_time
                 ):
-                    if delivery.is_idle(session.file_path) and delivery.can_deliver():
-                        msg = compaction_trigger.format_reminder(usage.total_context)
-                        delivery.deliver(msg, "compaction")
+                    msg = compaction_trigger.format_reminder(usage.total_context)
+                    result = delivery.deliver(msg, "compaction", mode="reminder")
+                    if result.success:
                         compaction_trigger.record_reminder_sent()
 
             # Check memory filing
@@ -161,11 +161,11 @@ def run_monitor(config: AcpConfig) -> None:
                 if milestones:
                     decision = memory_trigger.evaluate(milestone_detected=True)
                     if decision.action == "fire":
-                        if delivery.is_idle(
-                            session.file_path
-                        ) and delivery.can_deliver():
-                            msg = memory_trigger.format_reminder()
-                            delivery.deliver(msg, "memory_filing")
+                        msg = memory_trigger.format_reminder()
+                        result = delivery.deliver(
+                            msg, "memory_filing", mode="reminder"
+                        )
+                        if result.success:
                             memory_trigger.record_reminder_sent()
 
             time.sleep(config.polling_interval)

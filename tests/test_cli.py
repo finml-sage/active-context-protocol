@@ -548,7 +548,9 @@ class TestRunMonitor:
             tracker.find_active_session.assert_called()
             token_mon.read_latest_usage.assert_called()
             compaction.should_fire.assert_called()
-            delivery.deliver.assert_called_once_with("[ACP] Compaction reminder", "compaction")
+            delivery.deliver.assert_called_once_with(
+                "[ACP] Compaction reminder", "compaction", mode="reminder"
+            )
             compaction.record_reminder_sent.assert_called_once()
 
     def test_session_rotation_resets_state(self, tmp_pid: Path) -> None:
@@ -641,7 +643,7 @@ class TestRunMonitor:
             run_monitor(config)
 
             delivery.deliver.assert_called_once_with(
-                "[ACP] Memory filing reminder", "memory_filing"
+                "[ACP] Memory filing reminder", "memory_filing", mode="reminder"
             )
             memory.record_reminder_sent.assert_called_once()
 
@@ -764,8 +766,13 @@ class TestRunMonitor:
 
             memory.scan_for_milestones.assert_not_called()
 
-    def test_no_delivery_when_not_idle(self, tmp_pid: Path) -> None:
-        """Compaction reminder is suppressed when delivery.is_idle returns False."""
+    def test_reminder_delivers_when_not_idle(self, tmp_pid: Path) -> None:
+        """Reminder-mode delivery proceeds even when the agent is not idle.
+
+        Issue #13: The monitor loop no longer gates on is_idle() for
+        reminder delivery.  Idle detection is only enforced in command
+        mode (inside DeliverySystem.deliver), not by the monitor loop.
+        """
         config = AcpConfig(
             polling_interval=1,
             tmux_session="test",
@@ -798,15 +805,23 @@ class TestRunMonitor:
 
             compaction = MockCompaction.return_value
             compaction.should_fire.return_value = True
+            compaction.format_reminder.return_value = "[ACP] Compaction reminder"
 
             delivery = MockDelivery.return_value
-            delivery.is_idle.return_value = False  # Not idle
+            # is_idle would return False, but the monitor loop no longer checks it
+            delivery.is_idle.return_value = False
 
             mock_sleep.side_effect = KeyboardInterrupt
 
             run_monitor(config)
 
-            delivery.deliver.assert_not_called()
+            # Key assertion: deliver IS called (with mode="reminder"),
+            # even though is_idle() would return False
+            delivery.deliver.assert_called_once_with(
+                "[ACP] Compaction reminder", "compaction", mode="reminder"
+            )
+            # is_idle should NOT have been called by the monitor loop
+            delivery.is_idle.assert_not_called()
 
 
 # ---------------------------------------------------------------------------

@@ -56,7 +56,7 @@ class CompactionTrigger:
         self,
         threshold: int = 70_000,
         cooldown_seconds: int = 120,
-        grace_period_seconds: int = 600,
+        grace_period_seconds: int = 300,
     ) -> None:
         self.threshold = threshold
         self.cooldown_seconds = cooldown_seconds

@@ -435,6 +435,7 @@ class TestAuditTrail:
         assert "test_trigger" in log_content
         assert "skipped_no_tmux" in log_content
         assert "hello world" in log_content
+        assert "mode=reminder" in log_content
 
     @patch("src.delivery.time.sleep")
     @patch("src.delivery.subprocess.run")
@@ -570,3 +571,229 @@ class TestEdgeCases:
         # stat().st_size == 0 -> returns None
         result = DeliverySystem._read_last_line(path)
         assert result is None
+
+
+# ---------------------------------------------------------------------------
+# Delivery mode tests (Issue #13)
+# ---------------------------------------------------------------------------
+
+
+class TestDeliveryModes:
+    """Tests for the reminder vs command delivery mode behavior.
+
+    Issue #13: Idle detection was blocking all reminder delivery during
+    active sessions.  The fix introduces delivery modes so that reminders
+    bypass idle detection while commands still require it.
+    """
+
+    @patch("src.delivery.time.sleep")
+    @patch("src.delivery.subprocess.run")
+    @patch("src.delivery.shutil.which", return_value="/usr/bin/tmux")
+    def test_reminder_mode_skips_idle_check(
+        self,
+        mock_which: MagicMock,
+        mock_run: MagicMock,
+        mock_sleep: MagicMock,
+        ds: DeliverySystem,
+        tmp_jsonl: Path,
+    ) -> None:
+        """Reminder mode delivers even when the agent is actively working."""
+        mock_run.return_value = MagicMock(returncode=0)
+
+        # Write an active (non-idle) JSONL — mtime is NOW, last entry is tool_use
+        _write_jsonl(
+            tmp_jsonl,
+            [{"type": "tool_use", "content": "running command"}],
+            mtime_offset=0,
+        )
+        # Verify idle detection would return False
+        assert ds.is_idle(tmp_jsonl) is False
+
+        # Deliver in reminder mode — should succeed anyway
+        result = ds.deliver(
+            "Time to save memory", "memory_filing", mode="reminder"
+        )
+        assert result.success is True
+        assert result.outcome == "delivered"
+
+    @patch("src.delivery.time.sleep")
+    @patch("src.delivery.subprocess.run")
+    @patch("src.delivery.shutil.which", return_value="/usr/bin/tmux")
+    def test_command_mode_requires_idle(
+        self,
+        mock_which: MagicMock,
+        mock_run: MagicMock,
+        mock_sleep: MagicMock,
+        ds: DeliverySystem,
+        tmp_jsonl: Path,
+    ) -> None:
+        """Command mode blocks delivery when the agent is not idle."""
+        mock_run.return_value = MagicMock(returncode=0)
+
+        # Write an active (non-idle) JSONL
+        _write_jsonl(
+            tmp_jsonl,
+            [{"type": "tool_use", "content": "running command"}],
+            mtime_offset=0,
+        )
+
+        result = ds.deliver(
+            "/compact now", "compaction", mode="command", jsonl_path=tmp_jsonl
+        )
+        assert result.success is False
+        assert result.outcome == "queued_not_idle"
+
+    @patch("src.delivery.time.sleep")
+    @patch("src.delivery.subprocess.run")
+    @patch("src.delivery.shutil.which", return_value="/usr/bin/tmux")
+    def test_command_mode_delivers_when_idle(
+        self,
+        mock_which: MagicMock,
+        mock_run: MagicMock,
+        mock_sleep: MagicMock,
+        ds: DeliverySystem,
+        tmp_jsonl: Path,
+    ) -> None:
+        """Command mode delivers when the agent IS idle."""
+        mock_run.return_value = MagicMock(returncode=0)
+
+        # Write an idle JSONL — old mtime, last entry is assistant text
+        _write_jsonl(
+            tmp_jsonl,
+            [{"type": "assistant", "content": "done"}],
+            mtime_offset=-10,
+        )
+        assert ds.is_idle(tmp_jsonl) is True
+
+        result = ds.deliver(
+            "/compact now", "compaction", mode="command", jsonl_path=tmp_jsonl
+        )
+        assert result.success is True
+        assert result.outcome == "delivered"
+
+    @patch("src.delivery.subprocess.run")
+    @patch("src.delivery.shutil.which", return_value="/usr/bin/tmux")
+    def test_command_mode_fails_without_jsonl_path(
+        self,
+        mock_which: MagicMock,
+        mock_run: MagicMock,
+        ds: DeliverySystem,
+    ) -> None:
+        """Command mode with no jsonl_path fails gracefully."""
+        mock_run.return_value = MagicMock(returncode=0)
+
+        result = ds.deliver(
+            "/compact now", "compaction", mode="command", jsonl_path=None
+        )
+        assert result.success is False
+        assert result.outcome == "failed"
+
+    def test_default_mode_is_reminder(self, ds: DeliverySystem) -> None:
+        """deliver() defaults to reminder mode for backwards compatibility."""
+        # Verify by calling with only positional args (no mode kwarg).
+        # We only need to check the signature default, not actual delivery.
+        import inspect
+
+        sig = inspect.signature(ds.deliver)
+        mode_param = sig.parameters["mode"]
+        assert mode_param.default == "reminder"
+
+    @patch("src.delivery.time.sleep")
+    @patch("src.delivery.subprocess.run")
+    @patch("src.delivery.shutil.which", return_value="/usr/bin/tmux")
+    def test_warmdown_enforced_in_reminder_mode(
+        self,
+        mock_which: MagicMock,
+        mock_run: MagicMock,
+        mock_sleep: MagicMock,
+        ds: DeliverySystem,
+    ) -> None:
+        """Warmdown is still enforced even in reminder mode."""
+        mock_run.return_value = MagicMock(returncode=0)
+
+        result1 = ds.deliver("msg1", "compaction", mode="reminder")
+        assert result1.success is True
+
+        result2 = ds.deliver("msg2", "memory_filing", mode="reminder")
+        assert result2.success is False
+        assert result2.outcome == "queued_warmdown"
+
+    @patch("src.delivery.time.sleep")
+    @patch("src.delivery.subprocess.run")
+    @patch("src.delivery.shutil.which", return_value="/usr/bin/tmux")
+    def test_audit_log_records_reminder_mode(
+        self,
+        mock_which: MagicMock,
+        mock_run: MagicMock,
+        mock_sleep: MagicMock,
+        tmp_log: Path,
+    ) -> None:
+        """Audit trail includes mode=reminder for reminder deliveries."""
+        mock_run.return_value = MagicMock(returncode=0)
+        ds = DeliverySystem(tmux_session="test", log_file=tmp_log)
+        ds.deliver("reminder text", "memory_filing", mode="reminder")
+
+        log_content = tmp_log.read_text()
+        assert "mode=reminder" in log_content
+        assert "delivered" in log_content
+
+    @patch("src.delivery.time.sleep")
+    @patch("src.delivery.subprocess.run")
+    @patch("src.delivery.shutil.which", return_value="/usr/bin/tmux")
+    def test_audit_log_records_command_mode(
+        self,
+        mock_which: MagicMock,
+        mock_run: MagicMock,
+        mock_sleep: MagicMock,
+        tmp_log: Path,
+        tmp_jsonl: Path,
+    ) -> None:
+        """Audit trail includes mode=command for command deliveries."""
+        mock_run.return_value = MagicMock(returncode=0)
+        ds = DeliverySystem(
+            tmux_session="test",
+            idle_threshold_seconds=0.5,
+            log_file=tmp_log,
+        )
+        _write_jsonl(
+            tmp_jsonl,
+            [{"type": "assistant", "content": "done"}],
+            mtime_offset=-10,
+        )
+        ds.deliver(
+            "/compact now", "compaction", mode="command", jsonl_path=tmp_jsonl
+        )
+
+        log_content = tmp_log.read_text()
+        assert "mode=command" in log_content
+        assert "delivered" in log_content
+
+    @patch("src.delivery.subprocess.run")
+    @patch("src.delivery.shutil.which", return_value="/usr/bin/tmux")
+    def test_audit_log_records_mode_on_not_idle(
+        self,
+        mock_which: MagicMock,
+        mock_run: MagicMock,
+        tmp_log: Path,
+        tmp_jsonl: Path,
+    ) -> None:
+        """Audit trail records mode=command even when queued_not_idle."""
+        mock_run.return_value = MagicMock(returncode=0)
+        ds = DeliverySystem(
+            tmux_session="test",
+            idle_threshold_seconds=0.5,
+            log_file=tmp_log,
+        )
+        # Active JSONL — not idle
+        _write_jsonl(
+            tmp_jsonl,
+            [{"type": "tool_use", "content": "running"}],
+            mtime_offset=0,
+        )
+        ds.deliver(
+            "/compact now", "compaction", mode="command", jsonl_path=tmp_jsonl
+        )
+
+        log_content = tmp_log.read_text()
+        assert "mode=command" in log_content
+        assert "queued_not_idle" in log_content

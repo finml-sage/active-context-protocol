@@ -24,6 +24,9 @@ from typing import Literal
 
 logger = logging.getLogger(__name__)
 
+# Valid delivery modes
+DeliveryMode = Literal["reminder", "command"]
+
 # Valid outcomes for delivery attempts
 DeliveryOutcome = Literal[
     "delivered",
@@ -97,12 +100,18 @@ class DeliverySystem:
         self._audit_logger.addHandler(handler)
 
     def _audit(
-        self, trigger_type: str, outcome: DeliveryOutcome, message: str
+        self,
+        trigger_type: str,
+        outcome: DeliveryOutcome,
+        message: str,
+        mode: DeliveryMode = "reminder",
     ) -> None:
         """Append an entry to the audit trail."""
         now = datetime.now(timezone.utc).isoformat(timespec="seconds")
         preview = message[:80].replace("\n", " ")
-        self._audit_logger.info(f"{now} | {trigger_type} | {outcome} | {preview}")
+        self._audit_logger.info(
+            f"{now} | {trigger_type} | {outcome} | mode={mode} | {preview}"
+        )
 
     def is_idle(self, jsonl_path: Path) -> bool:
         """Check whether the agent is idle based on its JSONL session log.
@@ -186,24 +195,37 @@ class DeliverySystem:
         ).total_seconds()
         return elapsed >= self.warmdown_seconds
 
-    def deliver(self, message: str, trigger_type: str) -> DeliveryResult:
+    def deliver(
+        self,
+        message: str,
+        trigger_type: str,
+        mode: DeliveryMode = "reminder",
+        jsonl_path: Path | None = None,
+    ) -> DeliveryResult:
         """Attempt to deliver a message to the tmux session.
 
         Checks preconditions in order:
         1. tmux binary available
         2. Target session exists
-        3. Global warmdown elapsed
+        3. In ``command`` mode: agent must be idle (requires ``jsonl_path``)
+        4. Global warmdown elapsed
 
-        Note: idle detection is NOT checked here — the caller is responsible
-        for checking ``is_idle()`` and deciding whether to queue or deliver.
-        This keeps delivery and idle detection composable.
+        In ``reminder`` mode (the default), idle detection is skipped.
+        Reminders are text input that can arrive any time — the agent
+        processes them on its next turn.  Only the warmdown gate applies.
 
-        If all preconditions pass, delivers via the two-call tmux pattern.
+        In ``command`` mode, idle detection is enforced because commands
+        (like ``/compact``) must arrive at the idle input prompt to be
+        parsed as CLI slash commands rather than user text.
 
         Args:
             message: The text to deliver to the tmux session.
             trigger_type: Category of the trigger (e.g., "compaction",
                 "memory_filing", "custom").
+            mode: Delivery mode — ``"reminder"`` (default) skips idle
+                detection; ``"command"`` requires idle.
+            jsonl_path: Path to the JSONL session file.  Required when
+                ``mode="command"`` so ``is_idle()`` can be evaluated.
 
         Returns:
             A DeliveryResult describing what happened.
@@ -219,7 +241,7 @@ class DeliverySystem:
                 trigger_type=trigger_type,
                 message=message,
             )
-            self._audit(trigger_type, result.outcome, message)
+            self._audit(trigger_type, result.outcome, message, mode)
             return result
 
         # Check 2: session exists
@@ -231,10 +253,36 @@ class DeliverySystem:
                 trigger_type=trigger_type,
                 message=message,
             )
-            self._audit(trigger_type, result.outcome, message)
+            self._audit(trigger_type, result.outcome, message, mode)
             return result
 
-        # Check 3: warmdown
+        # Check 3: idle detection (command mode only)
+        if mode == "command":
+            if jsonl_path is None:
+                logger.error(
+                    "command mode delivery requires jsonl_path, got None"
+                )
+                result = DeliveryResult(
+                    success=False,
+                    outcome="failed",
+                    timestamp=now,
+                    trigger_type=trigger_type,
+                    message=message,
+                )
+                self._audit(trigger_type, result.outcome, message, mode)
+                return result
+            if not self.is_idle(jsonl_path):
+                result = DeliveryResult(
+                    success=False,
+                    outcome="queued_not_idle",
+                    timestamp=now,
+                    trigger_type=trigger_type,
+                    message=message,
+                )
+                self._audit(trigger_type, result.outcome, message, mode)
+                return result
+
+        # Check 4: warmdown
         if not self.can_deliver():
             result = DeliveryResult(
                 success=False,
@@ -243,7 +291,7 @@ class DeliverySystem:
                 trigger_type=trigger_type,
                 message=message,
             )
-            self._audit(trigger_type, result.outcome, message)
+            self._audit(trigger_type, result.outcome, message, mode)
             return result
 
         # All preconditions met — deliver
@@ -257,7 +305,7 @@ class DeliverySystem:
                 trigger_type=trigger_type,
                 message=message,
             )
-            self._audit(trigger_type, result.outcome, message)
+            self._audit(trigger_type, result.outcome, message, mode)
             return result
         except (subprocess.CalledProcessError, OSError) as exc:
             logger.error("tmux delivery failed: %s", exc)
@@ -268,7 +316,7 @@ class DeliverySystem:
                 trigger_type=trigger_type,
                 message=message,
             )
-            self._audit(trigger_type, result.outcome, message)
+            self._audit(trigger_type, result.outcome, message, mode)
             return result
 
     # --- Private helpers ---

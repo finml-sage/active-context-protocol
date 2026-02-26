@@ -41,7 +41,7 @@ class AcpConfig:
 
     # Delivery
     warmdown_interval: int = 120  # seconds between reminders (global)
-    grace_period: int = 600  # seconds after session start before any reminders
+    grace_period: int = 300  # seconds after session start before any reminders
     tmux_session: str = ""  # target tmux session name
     log_file: str = "~/.acp/acp.log"
 
@@ -294,7 +294,7 @@ polling_interval: 30          # Seconds between monitoring cycles
 
 # Delivery — how reminders reach the agent
 warmdown_interval: 120        # Minimum seconds between any two reminders (global)
-grace_period: 600             # Seconds after session start before any reminders fire
+grace_period: 300             # Seconds after session start before any reminders fire
 tmux_session: ""              # Target tmux session name (required for delivery)
 log_file: "~/.acp/acp.log"   # Audit trail for all delivery attempts
 
