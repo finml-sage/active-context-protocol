@@ -1,0 +1,16 @@
+[build-system]
+requires = ["setuptools>=68.0", "wheel"]
+build-backend = "setuptools.backends._legacy:_Backend"
+
+[project]
+name = "active-context-protocol"
+version = "0.1.0"
+description = "Active context management and action protocol for Claude Code agents"
+requires-python = ">=3.11"
+license = {text = "MIT"}
+
+[project.optional-dependencies]
+test = ["pytest>=7.0"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
