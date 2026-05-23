@@ -208,54 +208,64 @@ class TestFindActiveSession:
 # ---------------------------------------------------------------------------
 
 class TestCheckRotation:
-    """Tests for FileTracker.check_rotation."""
+    """Tests for FileTracker.check_rotation.
+
+    Note: ``check_rotation`` requires the caller to pass in the session
+    most recently returned by ``find_active_session``.  Each test below
+    mirrors the daemon's tick pattern: find-then-check.
+    """
 
     def test_no_previous_session(self, tmp_path: Path) -> None:
         """First call with no prior session -> False."""
         _make_session_file(tmp_path)
 
         tracker = FileTracker(claude_dir=tmp_path)
-        assert tracker.check_rotation() is False
+        current = tracker.find_active_session()
+        assert tracker.check_rotation(current) is False
 
     def test_same_session_no_rotation(self, tmp_path: Path) -> None:
         """Same file active on consecutive calls -> False."""
         _make_session_file(tmp_path)
 
         tracker = FileTracker(claude_dir=tmp_path)
-        tracker.find_active_session()  # establish baseline
-        assert tracker.check_rotation() is False
+        # Tick 1 — establish baseline.
+        tracker.check_rotation(tracker.find_active_session())
+        # Tick 2 — same file.
+        assert tracker.check_rotation(tracker.find_active_session()) is False
 
     def test_rotation_detected(self, tmp_path: Path) -> None:
         """New file appears with newer mtime -> rotation detected."""
         _make_session_file(tmp_path, session_id=str(uuid.uuid4()), mtime_offset=-10)
 
         tracker = FileTracker(claude_dir=tmp_path)
-        tracker.find_active_session()
+        # Tick 1 — establish baseline.
+        tracker.check_rotation(tracker.find_active_session())
 
-        # Simulate new session appearing
+        # Simulate new session appearing.
         _make_session_file(tmp_path, session_id=str(uuid.uuid4()), mtime_offset=100)
 
-        assert tracker.check_rotation() is True
+        # Tick 2 — rotation expected.
+        assert tracker.check_rotation(tracker.find_active_session()) is True
 
     def test_rotation_resets_read_position(self, tmp_path: Path) -> None:
         """Rotation resets the read position to 0."""
         _make_session_file(tmp_path, session_id=str(uuid.uuid4()), mtime_offset=-10)
 
         tracker = FileTracker(claude_dir=tmp_path)
-        tracker.find_active_session()
+        tracker.check_rotation(tracker.find_active_session())
         tracker.update_read_position(500)
         assert tracker.get_read_position() == 500
 
-        # New session
+        # New session.
         _make_session_file(tmp_path, session_id=str(uuid.uuid4()), mtime_offset=100)
-        tracker.check_rotation()
+        tracker.check_rotation(tracker.find_active_session())
 
         assert tracker.get_read_position() == 0
 
     def test_no_files_no_rotation(self, tmp_path: Path) -> None:
         """Empty dir -> no rotation."""
         tracker = FileTracker(claude_dir=tmp_path)
-        assert tracker.check_rotation() is False
+        assert tracker.check_rotation(tracker.find_active_session()) is False
 
     def test_rotation_after_deletion_and_new_file(self, tmp_path: Path) -> None:
         """Old file deleted, new file appears -> rotation detected."""
@@ -263,13 +273,23 @@ class TestCheckRotation:
         old_path = _make_session_file(tmp_path, session_id=old_id, mtime_offset=-10)
 
         tracker = FileTracker(claude_dir=tmp_path)
-        tracker.find_active_session()
+        tracker.check_rotation(tracker.find_active_session())
 
-        # Delete old, create new
+        # Delete old, create new.
         old_path.unlink()
         _make_session_file(tmp_path, session_id=str(uuid.uuid4()), mtime_offset=100)
 
-        assert tracker.check_rotation() is True
+        assert tracker.check_rotation(tracker.find_active_session()) is True
+
+    def test_check_rotation_requires_argument(self, tmp_path: Path) -> None:
+        """Calling check_rotation() with no argument is a TypeError.
+
+        Guards against regressions to the prior (broken) zero-arg form
+        which silently swallowed rotations.
+        """
+        tracker = FileTracker(claude_dir=tmp_path)
+        with pytest.raises(TypeError):
+            tracker.check_rotation()  # type: ignore[call-arg]
 
 
 # ---------------------------------------------------------------------------
@@ -372,11 +392,11 @@ class TestIntegrationScenarios:
         """Simulate a full session lifecycle: start, read, rotate, read."""
         tracker = FileTracker(claude_dir=tmp_path)
 
-        # No sessions yet
+        # No sessions yet.
         assert tracker.find_active_session() is None
-        assert tracker.check_rotation() is False
+        assert tracker.check_rotation(None) is False
 
-        # Session 1 starts
+        # Session 1 starts.
         s1_id = str(uuid.uuid4())
         _make_session_file(tmp_path, session_id=s1_id, content='{"event":"start"}\n')
 
@@ -384,45 +404,150 @@ class TestIntegrationScenarios:
         assert info1 is not None
         assert info1.session_id == s1_id
 
-        # Read some data
+        # First observation — no rotation, baseline remembered.
+        assert tracker.check_rotation(info1) is False
+
+        # Read some data.
         tracker.update_read_position(19)
         assert tracker.get_read_position() == 19
 
-        # No rotation yet
-        assert tracker.check_rotation() is False
+        # Same session on next tick — no rotation.
+        assert tracker.check_rotation(tracker.find_active_session()) is False
 
-        # Session 2 starts (new file)
+        # Session 2 starts (new file).
         s2_id = str(uuid.uuid4())
         _make_session_file(tmp_path, session_id=s2_id, content='{"event":"start2"}\n', mtime_offset=200)
-
-        # Rotation detected
-        assert tracker.check_rotation() is True
-        assert tracker.get_read_position() == 0  # reset
 
         info2 = tracker.find_active_session()
         assert info2 is not None
         assert info2.session_id == s2_id
 
+        # Rotation detected; read position resets.
+        assert tracker.check_rotation(info2) is True
+        assert tracker.get_read_position() == 0
+
     def test_multiple_projects_lifecycle(self, tmp_path: Path) -> None:
         """Sessions across different projects, tracker follows the most recent."""
         tracker = FileTracker(claude_dir=tmp_path)
 
-        # Project A session
+        # Project A session.
         _make_session_file(tmp_path, project="proj-a", mtime_offset=-50)
         info = tracker.find_active_session()
         assert info is not None
         assert info.project_path == "proj-a"
+        assert tracker.check_rotation(info) is False  # baseline
 
-        # Project B session (newer)
+        # Project B session (newer).
         _make_session_file(tmp_path, project="proj-b", mtime_offset=50)
-        assert tracker.check_rotation() is True
         info = tracker.find_active_session()
         assert info is not None
         assert info.project_path == "proj-b"
+        assert tracker.check_rotation(info) is True
 
-        # Project A gets a newer session
+        # Project A gets a newer session.
         _make_session_file(tmp_path, project="proj-a", mtime_offset=200)
-        assert tracker.check_rotation() is True
         info = tracker.find_active_session()
         assert info is not None
         assert info.project_path == "proj-a"
+        assert tracker.check_rotation(info) is True
+
+
+# ---------------------------------------------------------------------------
+# Regression: daemon main-loop call pattern (find then check)
+# ---------------------------------------------------------------------------
+
+class TestDaemonCallPatternRotation:
+    """Regression tests for the daemon's actual call pattern.
+
+    The daemon's main loop (src/cli.py) calls ``find_active_session()`` on
+    every iteration BEFORE calling ``check_rotation()``.  A prior version of
+    ``check_rotation()`` captured ``self._current_session`` as the "previous"
+    session, but ``find_active_session()`` had already overwritten that field
+    moments earlier — so ``previous`` and ``current`` were always identical
+    and rotation was never detected.
+
+    Empirical evidence of the silent failure: the delivery audit log showed
+    no fires between 2026-05-13 and 2026-05-23 even though multiple
+    Claude Code sessions on May 21 and May 23 crossed the 250k-token
+    threshold.  The root cause was the rotation check above.
+    """
+
+    def test_rotation_detected_under_daemon_call_pattern(self, tmp_path: Path) -> None:
+        """find_active_session() then check_rotation(session) must detect rotation.
+
+        Replicates ``src/cli.py::run_monitor``: every polling tick calls
+        ``find_active_session()`` first and then ``check_rotation(session)``.
+        """
+        tracker = FileTracker(claude_dir=tmp_path)
+
+        # Tick 1: only session 1 exists.
+        _make_session_file(
+            tmp_path, session_id=str(uuid.uuid4()), mtime_offset=-10
+        )
+        session_1 = tracker.find_active_session()
+        assert session_1 is not None
+        assert tracker.check_rotation(session_1) is False  # no prior session
+
+        # Tick 2: session 2 appears with a newer mtime — rotation expected.
+        _make_session_file(
+            tmp_path, session_id=str(uuid.uuid4()), mtime_offset=100
+        )
+        session_2 = tracker.find_active_session()
+        assert session_2 is not None
+        assert session_2.file_path != session_1.file_path
+
+        # Pre-fix, check_rotation took no argument and re-called
+        # find_active_session() internally, which (because the prior
+        # find_active_session on the line above had already mutated
+        # _current_session) caused "previous" == "current" and rotation
+        # was silently dropped.  The fix is to pass *current* in
+        # explicitly so the comparison uses the truly-previous session.
+        assert tracker.check_rotation(session_2) is True
+
+    def test_rotation_resets_read_position_under_daemon_call_pattern(
+        self, tmp_path: Path
+    ) -> None:
+        """Read position must reset to 0 when rotation fires under the
+        daemon's call order.
+
+        Consequence of the bug pre-fix: ``TokenMonitor._last_position`` /
+        ``FileTracker._read_position`` leaked across sessions, so the next
+        ``f.seek(leaked_offset)`` landed past EOF on the (smaller) new
+        JSONL and ``read_latest_usage`` returned ``None`` — no reminder
+        could fire even when the new session crossed the threshold.
+        """
+        tracker = FileTracker(claude_dir=tmp_path)
+
+        # Tick 1: session 1 exists; daemon advances read position into it.
+        _make_session_file(
+            tmp_path, session_id=str(uuid.uuid4()), mtime_offset=-10
+        )
+        s1 = tracker.find_active_session()
+        tracker.check_rotation(s1)  # no prior session -> False
+        tracker.update_read_position(500_000)
+        assert tracker.get_read_position() == 500_000
+
+        # Tick 2: session 2 appears (smaller, newer). Daemon polls.
+        _make_session_file(
+            tmp_path, session_id=str(uuid.uuid4()), mtime_offset=100
+        )
+        s2 = tracker.find_active_session()
+        rotated = tracker.check_rotation(s2)
+
+        assert rotated is True
+        assert tracker.get_read_position() == 0
+
+    def test_no_rotation_under_daemon_call_pattern(self, tmp_path: Path) -> None:
+        """When the active file is unchanged across two ticks, the daemon
+        call pattern must report no rotation."""
+        tracker = FileTracker(claude_dir=tmp_path)
+
+        _make_session_file(tmp_path, session_id=str(uuid.uuid4()))
+
+        # Tick 1.
+        tick_1 = tracker.find_active_session()
+        tracker.check_rotation(tick_1)
+
+        # Tick 2 — no new file.
+        tick_2 = tracker.find_active_session()
+        assert tracker.check_rotation(tick_2) is False
