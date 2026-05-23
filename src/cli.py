@@ -134,7 +134,7 @@ def run_monitor(config: AcpConfig) -> None:
                 time.sleep(config.polling_interval)
                 continue
 
-            if tracker.check_rotation():
+            if tracker.check_rotation(session):
                 session_start_time = time.time()
                 compaction_trigger.record_compaction_detected()  # Reset on new session
 

@@ -110,6 +110,10 @@ class FileTracker:
         Scans all ``*.jsonl`` files recursively under :pyattr:`claude_dir`
         whose filenames (stems) are valid UUIDs.  Returns the one with the
         highest modification time, or ``None`` if no qualifying files exist.
+
+        This method does **not** mutate any rotation-detection state.
+        Callers that need to detect rotation must pass both the previous
+        and current sessions to :pymeth:`check_rotation` explicitly.
         """
         if not self._claude_dir.is_dir():
             logger.debug("claude_dir does not exist: %s", self._claude_dir)
@@ -126,26 +130,45 @@ class FileTracker:
             if best is None or info.mtime > best.mtime:
                 best = info
 
-        if best is not None:
-            self._current_session = best
-
         return best
 
-    def check_rotation(self) -> bool:
+    def check_rotation(self, current: SessionInfo | None) -> bool:
         """Check whether the active session has rotated.
 
-        Calls :pymeth:`find_active_session` internally and compares the
-        result with the previously known session.  Returns ``True`` if the
-        active file has changed (different path), indicating a new session
-        started.  On the very first call (no previous session known) this
-        returns ``False``.
+        Compares *current* (the session returned by the latest
+        :pymeth:`find_active_session` call) with the previously remembered
+        active session.  Returns ``True`` if the active file path has
+        changed, indicating a new session started.  On the very first
+        call (no previous session known) this returns ``False``.
 
-        When rotation is detected the read position is reset to 0.
+        When rotation is detected the read position is reset to 0 and
+        the remembered session is advanced to *current*.
+
+        Args:
+            current: The session most recently discovered by the caller,
+                or ``None`` if no active session exists this tick.
+
+        Note:
+            Earlier versions of this method took no argument and called
+            ``find_active_session()`` internally to obtain *current*.
+            That was unsafe because the caller had typically already
+            called ``find_active_session()`` itself; the previous tracker
+            also mutated ``_current_session`` inside ``find_active_session``,
+            which meant the "previous" captured here was the same object
+            as "current" and rotation was never detected.  The current
+            contract requires the caller to pass *current* explicitly.
         """
         previous = self._current_session
-        current = self.find_active_session()
 
-        if previous is None or current is None:
+        if current is None:
+            # No active session this tick — do not advance and do not
+            # report rotation.  A future tick with a real session will
+            # treat the prior remembered session as "previous".
+            return False
+
+        if previous is None:
+            # First observation — remember it but do not report rotation.
+            self._current_session = current
             return False
 
         rotated = current.file_path != previous.file_path
@@ -156,6 +179,7 @@ class FileTracker:
                 current.session_id,
             )
             self._read_position = 0
+        self._current_session = current
         return rotated
 
     def get_read_position(self) -> int:
