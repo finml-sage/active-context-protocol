@@ -57,10 +57,16 @@ class CompactionTrigger:
         threshold: int = 70_000,
         cooldown_seconds: int = 120,
         grace_period_seconds: int = 300,
+        optimization_enabled: bool = True,
+        optimization_token_budget: int = 30_000,
+        optimization_subagent_budget: int = 1,
     ) -> None:
         self.threshold = threshold
         self.cooldown_seconds = cooldown_seconds
         self.grace_period_seconds = grace_period_seconds
+        self.optimization_enabled = optimization_enabled
+        self.optimization_token_budget = optimization_token_budget
+        self.optimization_subagent_budget = optimization_subagent_budget
 
         self._last_reminder_time: float | None = None
         self._pending: bool = False
@@ -199,8 +205,42 @@ class CompactionTrigger:
             A human-readable reminder string suitable for delivery via tmux.
         """
         pct = int(round(total_context_tokens / self.threshold * 100))
-        return (
+        msg = (
             f"[ACP] Context at {total_context_tokens} tokens "
             f"({pct}% of {self.threshold} threshold). "
             f"Consider compacting when ready."
+        )
+        if self.optimization_enabled:
+            msg += " " + self.format_optimization_grant()
+        return msg
+
+    def format_optimization_grant(self) -> str:
+        """Generate the metered self-optimization allowance text.
+
+        This is the *only* sanctioned window for self-improvement work. Outside
+        it, self-optimization is not authorized — which is the point. An
+        unbounded standing order to improve oneself is indistinguishable from
+        self-examination as a full-time job, and it reliably crowds out the
+        actual task.
+
+        The wording carries three constraints that matter more than the number:
+        the budgets are alternatives rather than a sum, the trigger must be an
+        observed defect rather than a suspected one, and spending nothing is
+        stated as a correct outcome. Without the last clause a budget reads as
+        a quota, and a quota manufactures the very work it was meant to cap.
+
+        Returns:
+            A single-paragraph grant suitable for appending to a reminder.
+        """
+        return (
+            f"[ACP] Self-optimization window now open: up to "
+            f"{self.optimization_token_budget:,} tokens OR "
+            f"{self.optimization_subagent_budget} subagent task "
+            f"(sonnet/haiku) — whichever you pick, not both, and it closes "
+            f"when you compact. Eligible only: a defect you OBSERVED break "
+            f"something this session. Not eligible: reviewing your own "
+            f"reliability, re-reading rules for drift, or writing new rules "
+            f"about how to behave. No observed defect means spend nothing — "
+            f"an unspent window is a correct outcome, not a missed one. "
+            f"Then compact."
         )

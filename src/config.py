@@ -50,6 +50,13 @@ class AcpConfig:
     compaction_threshold: int = 70_000
     compaction_cooldown: int = 120
 
+    # Self-optimization window — the metered allowance attached to a compaction
+    # reminder. Bounded on purpose: an unbounded standing order to self-improve
+    # turns into self-examination as a full-time job.
+    self_optimization_enabled: bool = True
+    self_optimization_token_budget: int = 30_000
+    self_optimization_subagent_budget: int = 1
+
     # Triggers — memory filing
     memory_filing_enabled: bool = True
     memory_filing_grace_after_event: int = 60
@@ -184,6 +191,11 @@ _NESTED_MAP: dict[str, dict[str, str]] = {
         "enabled": "memory_filing_enabled",
         "grace_after_event": "memory_filing_grace_after_event",
         "patterns": "memory_filing_patterns",
+    },
+    "self_optimization": {
+        "enabled": "self_optimization_enabled",
+        "token_budget": "self_optimization_token_budget",
+        "subagent_budget": "self_optimization_subagent_budget",
     },
 }
 

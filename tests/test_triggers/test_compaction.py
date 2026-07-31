@@ -352,6 +352,63 @@ class TestFormatReminder:
 
 
 # ---------------------------------------------------------------------------
+# CompactionTrigger — self-optimization window
+# ---------------------------------------------------------------------------
+
+class TestOptimizationGrant:
+    """Tests for the metered self-optimization allowance."""
+
+    def test_grant_is_appended_by_default(self) -> None:
+        msg = CompactionTrigger(threshold=70_000).format_reminder(80_000)
+
+        assert "Self-optimization window" in msg
+        assert "30,000 tokens" in msg
+        assert "1 subagent task" in msg
+
+    def test_grant_can_be_disabled(self) -> None:
+        trigger = CompactionTrigger(threshold=70_000, optimization_enabled=False)
+        msg = trigger.format_reminder(80_000)
+
+        assert "Self-optimization" not in msg
+        assert "Consider compacting" in msg  # base reminder survives
+
+    def test_budgets_are_alternatives_not_a_sum(self) -> None:
+        """The window grants tokens OR a subagent. 'Both' is the failure."""
+        grant = CompactionTrigger(threshold=70_000).format_optimization_grant()
+
+        assert " OR " in grant
+        assert "not both" in grant
+
+    def test_spending_nothing_is_stated_as_correct(self) -> None:
+        """Without this clause a budget reads as a quota, and a quota
+        manufactures the work it was meant to cap."""
+        grant = CompactionTrigger(threshold=70_000).format_optimization_grant()
+
+        assert "spend nothing" in grant
+        assert "unspent window is a correct outcome" in grant
+
+    def test_self_examination_is_excluded(self) -> None:
+        """The budget exists to cap self-directed work, so self-directed work
+        must be named ineligible or the cap just meters the wrong activity."""
+        grant = CompactionTrigger(threshold=70_000).format_optimization_grant()
+
+        assert "OBSERVED" in grant
+        assert "Not eligible" in grant
+        assert "reliability" in grant
+
+    def test_custom_budgets_are_reflected(self) -> None:
+        trigger = CompactionTrigger(
+            threshold=70_000,
+            optimization_token_budget=12_500,
+            optimization_subagent_budget=2,
+        )
+        grant = trigger.format_optimization_grant()
+
+        assert "12,500 tokens" in grant
+        assert "2 subagent task" in grant
+
+
+# ---------------------------------------------------------------------------
 # CompactionTrigger — record_reminder_sent
 # ---------------------------------------------------------------------------
 

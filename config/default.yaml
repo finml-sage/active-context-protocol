@@ -20,6 +20,16 @@ compaction:
   threshold: 70000            # Token count that triggers compaction reminder
   cooldown: 120               # Seconds between compaction reminders
 
+# Self-optimization window
+# Attached to the compaction reminder, because that is the one moment the agent
+# is already stepping back from the task. Bounded on purpose: an unbounded
+# standing order to self-improve becomes self-examination as a full-time job.
+# The budgets are ALTERNATIVES, not a sum. Spending nothing is a valid outcome.
+self_optimization:
+  enabled: true
+  token_budget: 30000         # Max additional tokens per window
+  subagent_budget: 1          # OR one sonnet/haiku subagent task instead
+
 # Memory filing trigger
 memory_filing:
   enabled: true               # Whether memory filing reminders are active
