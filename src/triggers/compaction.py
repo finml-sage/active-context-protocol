@@ -57,10 +57,12 @@ class CompactionTrigger:
         threshold: int = 70_000,
         cooldown_seconds: int = 120,
         grace_period_seconds: int = 300,
+        reminder_suffix: str = "",
     ) -> None:
         self.threshold = threshold
         self.cooldown_seconds = cooldown_seconds
         self.grace_period_seconds = grace_period_seconds
+        self.reminder_suffix = reminder_suffix
 
         self._last_reminder_time: float | None = None
         self._pending: bool = False
@@ -199,8 +201,10 @@ class CompactionTrigger:
             A human-readable reminder string suitable for delivery via tmux.
         """
         pct = int(round(total_context_tokens / self.threshold * 100))
-        return (
+        base = (
             f"[ACP] Context at {total_context_tokens} tokens "
             f"({pct}% of {self.threshold} threshold). "
             f"Consider compacting when ready."
         )
+        suffix = self.reminder_suffix.strip()
+        return f"{base} {suffix}" if suffix else base

@@ -343,6 +343,40 @@ class TestFormatReminder:
         assert "100000" in msg
         assert "150%" in msg
 
+    def test_no_suffix_by_default(self) -> None:
+        """Absent configuration, the message is unchanged from before."""
+        trigger = CompactionTrigger(threshold=70_000)
+        msg = trigger.format_reminder(80_000)
+
+        assert msg.endswith("Consider compacting when ready.")
+
+    def test_suffix_is_appended(self) -> None:
+        trigger = CompactionTrigger(
+            threshold=70_000, reminder_suffix="Self-optimize first."
+        )
+        msg = trigger.format_reminder(80_000)
+
+        assert msg.endswith("Consider compacting when ready. Self-optimize first.")
+        # The factual half must survive intact -- the suffix adds policy, it
+        # does not replace the numbers the operator needs.
+        assert "80000" in msg
+        assert "114%" in msg
+
+    def test_whitespace_only_suffix_is_ignored(self) -> None:
+        """A blank suffix must not leave a trailing space on the message."""
+        trigger = CompactionTrigger(threshold=70_000, reminder_suffix="   \n  ")
+        msg = trigger.format_reminder(80_000)
+
+        assert msg.endswith("Consider compacting when ready.")
+
+    def test_suffix_is_stripped(self) -> None:
+        trigger = CompactionTrigger(
+            threshold=70_000, reminder_suffix="  Padded suffix.  "
+        )
+        msg = trigger.format_reminder(80_000)
+
+        assert msg.endswith("ready. Padded suffix.")
+
     def test_small_tokens(self) -> None:
         trigger = CompactionTrigger(threshold=70_000)
         msg = trigger.format_reminder(1000)

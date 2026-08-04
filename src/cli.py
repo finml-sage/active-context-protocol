@@ -103,6 +103,7 @@ def run_monitor(config: AcpConfig) -> None:
         threshold=config.compaction_threshold,
         cooldown_seconds=config.compaction_cooldown,
         grace_period_seconds=config.grace_period,
+        reminder_suffix=config.compaction_reminder_suffix,
     )
     memory_trigger = MemoryFilingTrigger(
         grace_after_event_seconds=config.memory_filing_grace_after_event,

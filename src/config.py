@@ -49,6 +49,11 @@ class AcpConfig:
     compaction_enabled: bool = True
     compaction_threshold: int = 70_000
     compaction_cooldown: int = 120
+    # Operator-supplied text appended to the compaction reminder. Empty by
+    # default: the trigger states the facts (tokens, threshold), and what an
+    # agent should DO about them is a per-deployment policy, not this tool's
+    # business. Keeps deployment-specific instructions out of shared code.
+    compaction_reminder_suffix: str = ""
 
     # Triggers — memory filing
     memory_filing_enabled: bool = True
@@ -179,6 +184,7 @@ _NESTED_MAP: dict[str, dict[str, str]] = {
         "enabled": "compaction_enabled",
         "threshold": "compaction_threshold",
         "cooldown": "compaction_cooldown",
+        "reminder_suffix": "compaction_reminder_suffix",
     },
     "memory_filing": {
         "enabled": "memory_filing_enabled",
