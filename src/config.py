@@ -102,6 +102,19 @@ def _parse_yaml_minimal(text: str) -> dict[str, Any]:
         key = key.strip()
         val = val.strip()
 
+        # Block scalars (`key: >`, `key: |`, with optional -/+/digit modifiers)
+        # are real YAML this parser cannot read. Coercing them would silently
+        # assign the literal indicator -- e.g. reminder_suffix would become the
+        # string ">-" and the operator's actual multi-line text would vanish
+        # with no error anywhere. Fail loudly and name the fix instead.
+        if val and val[0] in "|>" and set(val[1:]) <= set("+-0123456789"):
+            raise ValueError(
+                f"{key!r} uses a YAML block scalar ({val!r}), which the "
+                "built-in minimal parser cannot read. Install PyYAML "
+                "(pip install pyyaml) or rewrite the value as a single "
+                "quoted line."
+            )
+
         if indent == 0:
             if val == "" or val == "":
                 # Section header (nested block follows)

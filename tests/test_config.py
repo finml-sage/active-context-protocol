@@ -559,3 +559,23 @@ class TestLoadYamlFallback:
         with patch("yaml.safe_load", return_value="just a string"):
             result = _load_yaml("just a string")
         assert result == {}
+
+
+class TestBlockScalarRejection:
+    """The minimal parser must fail loudly on YAML it cannot read."""
+
+    def test_block_scalar_raises_instead_of_returning_indicator(self) -> None:
+        """Silently returning '>-' as the value is the bug this guards."""
+        import pytest
+
+        from src.config import _parse_yaml_minimal
+
+        with pytest.raises(ValueError, match="block scalar"):
+            _parse_yaml_minimal("compaction:\n  reminder_suffix: >-\n    some text\n")
+
+    def test_plain_value_starting_with_gt_is_not_mistaken_for_a_block(self) -> None:
+        """'>' only indicates a block when nothing but modifiers follow it."""
+        from src.config import _parse_yaml_minimal
+
+        out = _parse_yaml_minimal("note: >>> banner <<<\n")
+        assert out["note"] == ">>> banner <<<"

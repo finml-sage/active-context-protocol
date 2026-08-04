@@ -8,6 +8,7 @@ version = "0.1.0"
 description = "Active context management and action protocol for Claude Code agents"
 requires-python = ">=3.11"
 license = {text = "MIT"}
+dependencies = ["pyyaml>=6.0"]
 
 [project.scripts]
 acp = "src.cli:main"
