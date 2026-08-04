@@ -305,10 +305,20 @@ class TestCmdStatus:
 
 
 class TestCmdConfig:
-    def test_config_shows_defaults(self, capsys: pytest.CaptureFixture[str]) -> None:
-        """acp config displays all resolved settings."""
+    def test_config_shows_defaults(
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        """acp config displays all resolved settings.
+
+        Pointed at a nonexistent path on purpose. Without an explicit
+        --config this read the developer's real ~/.acp/config.yaml, so the
+        test asserted the library default while loading whatever that
+        machine happened to have configured -- it passed only on hosts with
+        no ACP config and failed for every actual operator.
+        """
+        missing = tmp_path / "does-not-exist.yaml"
         parser = build_parser()
-        args = parser.parse_args(["config"])
+        args = parser.parse_args(["--config", str(missing), "config"])
         result = cmd_config(args)
         assert result == 0
         captured = capsys.readouterr()
