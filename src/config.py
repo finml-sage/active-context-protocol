@@ -43,6 +43,9 @@ class AcpConfig:
     warmdown_interval: int = 120  # seconds between reminders (global)
     grace_period: int = 300  # seconds after session start before any reminders
     tmux_session: str = ""  # target tmux session name
+    delivery_backend: str = "tmux"  # "tmux" or "herdr"
+    herdr_target: str = ""  # herdr agent name or pane id (herdr backend)
+    herdr_bin: str = "herdr"  # herdr binary path (herdr backend)
     log_file: str = "~/.acp/acp.log"
 
     # Triggers — compaction
@@ -308,6 +311,9 @@ polling_interval: 30          # Seconds between monitoring cycles
 warmdown_interval: 120        # Minimum seconds between any two reminders (global)
 grace_period: 300             # Seconds after session start before any reminders fire
 tmux_session: ""              # Target tmux session name (required for delivery)
+delivery_backend: tmux        # tmux | herdr
+herdr_target: ""              # herdr agent name or pane id (herdr backend)
+herdr_bin: herdr              # herdr binary path (herdr backend)
 log_file: "~/.acp/acp.log"   # Audit trail for all delivery attempts
 
 # Idle detection
