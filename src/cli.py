@@ -95,6 +95,9 @@ def run_monitor(config: AcpConfig) -> None:
     token_monitor = TokenMonitor(threshold=config.token_threshold)
     delivery = DeliverySystem(
         tmux_session=config.tmux_session,
+        backend=config.delivery_backend,
+        herdr_target=config.herdr_target,
+        herdr_bin=config.herdr_bin,
         warmdown_seconds=config.warmdown_interval,
         idle_threshold_seconds=config.idle_threshold,
         log_file=Path(config.log_file).expanduser(),
@@ -196,7 +199,9 @@ def cmd_start(args: argparse.Namespace) -> int:
         return 1
 
     print("Starting ACP monitor...")
-    if config.tmux_session:
+    if config.delivery_backend == "herdr":
+        print(f"  herdr target: {config.herdr_target or '(none)'}")
+    elif config.tmux_session:
         print(f"  tmux session: {config.tmux_session}")
     else:
         print("  WARNING: no tmux_session configured — delivery will be skipped")

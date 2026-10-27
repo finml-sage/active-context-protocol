@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import subprocess
 import time
 from datetime import datetime, timezone
 from pathlib import Path
@@ -797,3 +798,59 @@ class TestDeliveryModes:
         log_content = tmp_log.read_text()
         assert "mode=command" in log_content
         assert "queued_not_idle" in log_content
+
+
+class TestHerdrBackend:
+    """Herdr backend: one `herdr agent prompt` call, target checked by `agent get`."""
+
+    def _ds(self, tmp_path):
+        return DeliverySystem(
+            tmux_session="",
+            backend="herdr",
+            herdr_target="w1:p1",
+            herdr_bin="/opt/herdr",
+            log_file=tmp_path / "acp.log",
+        )
+
+    def test_unknown_backend_rejected(self, tmp_path):
+        with pytest.raises(ValueError):
+            DeliverySystem(tmux_session="", backend="screen", log_file=tmp_path / "a.log")
+
+    def test_delivers_with_single_prompt_call(self, tmp_path):
+        ds = self._ds(tmp_path)
+        ok = subprocess.CompletedProcess(args=[], returncode=0)
+        with patch("src.delivery.shutil.which", return_value="/opt/herdr"), patch(
+            "src.delivery.subprocess.run", return_value=ok
+        ) as run:
+            result = ds.deliver("hello", trigger_type="custom")
+        assert result.success and result.outcome == "delivered"
+        calls = [c.args[0] for c in run.call_args_list]
+        assert calls[0] == ["/opt/herdr", "agent", "get", "w1:p1"]
+        assert calls[1] == ["/opt/herdr", "agent", "prompt", "w1:p1", "hello"]
+        assert len(calls) == 2
+
+    def test_missing_agent_skips(self, tmp_path):
+        ds = self._ds(tmp_path)
+        missing = subprocess.CompletedProcess(args=[], returncode=1)
+        with patch("src.delivery.shutil.which", return_value="/opt/herdr"), patch(
+            "src.delivery.subprocess.run", return_value=missing
+        ) as run:
+            result = ds.deliver("hello", trigger_type="custom")
+        assert result.outcome == "skipped_no_session"
+        assert run.call_count == 1
+
+    def test_missing_binary_skips(self, tmp_path):
+        ds = self._ds(tmp_path)
+        with patch("src.delivery.shutil.which", return_value=None):
+            result = ds.deliver("hello", trigger_type="custom")
+        assert result.outcome == "skipped_no_tmux"
+
+    def test_prompt_failure_reports_failed(self, tmp_path):
+        ds = self._ds(tmp_path)
+        ok = subprocess.CompletedProcess(args=[], returncode=0)
+        err = subprocess.CalledProcessError(2, ["herdr"])
+        with patch("src.delivery.shutil.which", return_value="/opt/herdr"), patch(
+            "src.delivery.subprocess.run", side_effect=[ok, err]
+        ):
+            result = ds.deliver("hello", trigger_type="custom")
+        assert result.outcome == "failed"

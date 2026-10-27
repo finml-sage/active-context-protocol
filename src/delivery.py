@@ -62,6 +62,12 @@ class DeliverySystem:
         idle_threshold_seconds: Seconds since last JSONL write to consider
             the agent idle. Default 5.
         log_file: Path for the audit trail. Falls back to stderr if None.
+        backend: ``"tmux"`` (default) or ``"herdr"``.  The herdr backend
+            delivers with ``herdr agent prompt <target> <text>``, which sends
+            text and Enter as one submission and refuses a target that does
+            not host a recognised agent.
+        herdr_target: Herdr agent name or pane id (herdr backend).
+        herdr_bin: Path to the herdr binary (herdr backend).
     """
 
     def __init__(
@@ -70,7 +76,15 @@ class DeliverySystem:
         warmdown_seconds: int = 120,
         idle_threshold_seconds: float = 5.0,
         log_file: Path | None = None,
+        backend: str = "tmux",
+        herdr_target: str = "",
+        herdr_bin: str = "herdr",
     ) -> None:
+        if backend not in ("tmux", "herdr"):
+            raise ValueError(f"unknown delivery backend: {backend!r}")
+        self.backend = backend
+        self.herdr_target = herdr_target
+        self.herdr_bin = herdr_bin
         self.tmux_session = tmux_session
         self.warmdown_seconds = warmdown_seconds
         self.idle_threshold_seconds = idle_threshold_seconds
@@ -233,7 +247,7 @@ class DeliverySystem:
         now = datetime.now(timezone.utc)
 
         # Check 1: tmux binary
-        if not self._tmux_available():
+        if not self._backend_available():
             result = DeliveryResult(
                 success=False,
                 outcome="skipped_no_tmux",
@@ -245,7 +259,7 @@ class DeliverySystem:
             return result
 
         # Check 2: session exists
-        if not self._session_exists():
+        if not self._target_exists():
             result = DeliveryResult(
                 success=False,
                 outcome="skipped_no_session",
@@ -296,7 +310,7 @@ class DeliverySystem:
 
         # All preconditions met — deliver
         try:
-            self._send_to_tmux(message)
+            self._send(message)
             self._last_delivery_time = datetime.now(timezone.utc)
             result = DeliveryResult(
                 success=True,
@@ -320,6 +334,46 @@ class DeliverySystem:
             return result
 
     # --- Private helpers ---
+
+    def _backend_available(self) -> bool:
+        if self.backend == "herdr":
+            return shutil.which(self.herdr_bin) is not None
+        return self._tmux_available()
+
+    def _target_exists(self) -> bool:
+        if self.backend == "herdr":
+            return self._herdr_agent_exists()
+        return self._session_exists()
+
+    def _send(self, message: str) -> None:
+        if self.backend == "herdr":
+            self._send_to_herdr(message)
+        else:
+            self._send_to_tmux(message)
+
+    def _herdr_agent_exists(self) -> bool:
+        """Check that the herdr target currently hosts an agent."""
+        if not self.herdr_target:
+            return False
+        try:
+            result = subprocess.run(
+                [self.herdr_bin, "agent", "get", self.herdr_target],
+                capture_output=True,
+                timeout=5,
+            )
+            return result.returncode == 0
+        except (subprocess.SubprocessError, OSError) as exc:
+            logger.warning("herdr agent check failed: %s", exc)
+            return False
+
+    def _send_to_herdr(self, message: str) -> None:
+        """Deliver text and Enter as one herdr submission."""
+        subprocess.run(
+            [self.herdr_bin, "agent", "prompt", self.herdr_target, message],
+            check=True,
+            capture_output=True,
+            timeout=15,
+        )
 
     @staticmethod
     def _tmux_available() -> bool:
