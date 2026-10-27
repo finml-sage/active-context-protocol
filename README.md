@@ -17,6 +17,7 @@ The key design principle: **ACP sends a reminder, not an auto-trigger.** The age
 - **Memory filing reminders** -- detects PR merges, issue closures, commits, and PR creates via pattern matching on tool results and tool calls
 - **Two delivery modes**: `reminder` (default, delivers anytime) and `command` (requires idle detection -- for future `/compact`-style delivery)
 - **tmux delivery** using the proven two-call `send-keys` pattern (text first, Enter separately)
+- **herdr delivery** (optional backend) via `herdr agent prompt`, which sends text and Enter as one submission and refuses a target that hosts no recognised agent
 - **Warmdown enforcement** -- global rate limit prevents reminder spam
 - **Session tracking** -- auto-detects the active JSONL session file, handles rotation
 - **Incremental reads** -- seeks from last position, never re-reads the full log
@@ -28,7 +29,7 @@ The key design principle: **ACP sends a reminder, not an auto-trigger.** The age
 ## Requirements
 
 - Python 3.11+
-- tmux (for delivery)
+- tmux (for delivery), or herdr with `delivery_backend: herdr`
 - Claude Code (the agent being monitored)
 - No external Python dependencies (PyYAML is optional for config parsing)
 
@@ -71,7 +72,10 @@ polling_interval: 30          # Seconds between monitoring cycles
 # Delivery -- how reminders reach the agent
 warmdown_interval: 120        # Minimum seconds between any two reminders (global)
 grace_period: 300             # Seconds after session start before any reminders fire
-tmux_session: ""              # Target tmux session name (REQUIRED for delivery)
+tmux_session: ""              # Target tmux session name (REQUIRED for tmux delivery)
+delivery_backend: tmux        # tmux | herdr
+herdr_target: ""              # herdr agent name or pane id (REQUIRED for herdr delivery)
+herdr_bin: herdr              # herdr binary path (herdr backend)
 log_file: "~/.acp/acp.log"   # Audit trail for all delivery attempts
 
 # Idle detection
@@ -91,6 +95,8 @@ memory_filing:
 ```
 
 The only required change is `tmux_session` -- set it to the name of the tmux session where Claude Code is running. Everything else has sensible defaults.
+
+If Claude Code runs in a herdr pane instead, set `delivery_backend: herdr` and `herdr_target` to the agent name or pane id; `tmux_session` is then unused. Give `herdr_bin` as an absolute path when the service runs without the binary on its PATH.
 
 If PyYAML is not installed, ACP uses a built-in minimal YAML parser that handles the flat key-value format above. No external dependencies required.
 
@@ -115,6 +121,8 @@ ACP Monitor (polling loop, configurable interval)
 **How it reads tokens**: Each `assistant` entry in the JSONL contains a `message.usage` block with `input_tokens`, `cache_creation_input_tokens`, and `cache_read_input_tokens`. ACP sums these for total context. This value grows monotonically, so only the latest entry matters.
 
 **How it delivers**: ACP sends text to the tmux session via `tmux send-keys`. Two separate subprocess calls are required -- one for the message text, one for Enter -- because a single call silently drops the Enter keystroke. In `reminder` mode (default), delivery happens regardless of agent activity. In `command` mode, ACP waits for the agent to be idle (no recent JSONL writes, last entry is an `assistant` type without `tool_use` blocks).
+
+With `delivery_backend: herdr`, ACP first checks the target with `herdr agent get <target>` and then delivers with one `herdr agent prompt <target> <text>` call; herdr submits text and Enter together, so the two-call pattern is not needed. Audit outcomes keep their existing names (`skipped_no_tmux` when the herdr binary is missing, `skipped_no_session` when the target hosts no agent).
 
 **How it prevents spam**: Four layers of protection:
 1. **Grace period** -- no reminders during the first N seconds of a session
